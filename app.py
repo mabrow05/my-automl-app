@@ -41,7 +41,7 @@ image_directory = os.getcwd()
 static_image_route = '/static/'
 
 
-pages = ['load-data-link','view-data-link','automl-link']
+pages = ['load-data-link','view-data-link','automl-link','results-link','interp-link','bias-link']
 
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.MATERIA])
@@ -111,6 +111,7 @@ def get_dataframe(session_id, filename = None, sep = '|', index_col = None):
     return pd.read_json(query_and_serialize_data(session_id))
 
 
+home_div = html.Div('This is the home page')
 
 
 data_div = html.Div([
@@ -179,7 +180,13 @@ data_div = html.Div([
                                 html.Br(),
                                 html.Label('Target'),
                                 dcc.Dropdown(id='target_dropdown',persistence=True),
-                                html.Br()
+                                html.Br(),
+                                html.Label('Problem Type'),
+                                dcc.Dropdown(id='problem_type_dropdown',
+                                             options=[{'label':'binary', 'value':'binary'},
+                                                      {'label':'multiclass', 'value':'multiclass'},
+                                                      {'label':'regression', 'value':'regression'}],
+                                             persistence=True),
                              ],
                                  width = 5
                          ),
@@ -209,7 +216,7 @@ automl_row1 = dbc.Row(
                     dbc.Button('Start AutoML',color="primary",id='start_automl_button', n_clicks=0)
                 ]
         ),
-        dbc.Col(html.Div(dbc.Spinner(html.Div(id='ml-table-div'))))
+        dbc.Col(html.Div(dbc.Spinner(html.Div(id='ml-results-div'))))
     ]
 )
 
@@ -227,7 +234,7 @@ automl_row2 = dbc.Row(
 automl_cards = html.Div(id='automl-div',
                         children = [
                             automl_row1,
-                            automl_row2,
+                            #automl_row2,
                             dbc.Row(dbc.Col(html.Div(id='ml-pipeline-fig-div',
                                                               style={'textAlign': 'center'}), 
                                            )
@@ -246,12 +253,33 @@ automl_cards = html.Div(id='automl-div',
 
 navbar = dbc.NavbarSimple(
     children=[
-        dbc.NavItem(dbc.NavLink("Load Data", href="/load-data", id="load-data-link")),
-        dbc.NavItem(dbc.NavLink("View Data", href="/view-data", id="view-data-link")),
-        dbc.NavItem(dbc.NavLink("AutoML", href="/automl", id="automl-link")),
+        dbc.NavItem(dbc.NavLink("Home", href="/", id="home-link")),
+        dbc.DropdownMenu(
+            children = [
+                dbc.DropdownMenuItem("Load Data", href="/load-data", id="load-data-link"),
+                dbc.DropdownMenuItem("View Data", href="/view-data", id="view-data-link"),
+            ],
+            nav=True,
+            in_navbar=True,
+            label="Data",
+        ),
+        dbc.DropdownMenu(
+            children=[
+                dbc.DropdownMenuItem("AutoML", href="/automl", id="automl-link"),
+                dbc.DropdownMenuItem("Model Results", href="/model-results", id="results-link"),
+                dbc.DropdownMenuItem("Interpretability", href="/interp", id="interp-link"),
+                dbc.DropdownMenuItem("Model Bias", href="/bias", id="bias-link"),
+            ],
+            nav=True,
+            in_navbar=True,
+            label="Modeling",
+        ),
+        
+        
+        
     ],
     brand="EvalML Made Simple",
-    brand_href="#",
+    brand_href="/",
     color="primary",
     dark=True,
 )
@@ -261,7 +289,7 @@ content = html.Div(id="page-content", style=CONTENT_STYLE)
 
 
 def serve_layout():
-    session_id = str(uuid.uuid4())
+    session_id = flask.request.authorization['username']#str(uuid.uuid4())
     print(session_id)
 
     return html.Div([
@@ -270,11 +298,11 @@ def serve_layout():
         # Hidden divs inside the app that stores the intermediate value
         dcc.Store(id='cached-features', storage_type='session'),
         dcc.Store(id='cached-target', storage_type='session'),
-        dcc.Store(id='cached-best-pipeline',storage_type='session'),
-        html.Div(session_id, id='session-id', style={'display': 'none'}),
+        dcc.Store(id='cached-pipelines', storage_type='session'),
+        dcc.Store(id='cached-problem-type', storage_type='session'),
+        dcc.Store(id='session-id', storage_type='session'),
         navbar, 
-        #html.H1(children='EvalML Automated Machine Learning Platform'),
-        #html.H2(children='''Open Source AutoML made easy.'''),
+      
         html.Br(),
         html.Br(),        
         content
@@ -284,6 +312,7 @@ def serve_layout():
 app.layout = serve_layout
 
 
+'''
 # this callback uses the current pathname to set the active state of the
 # corresponding nav link to true, allowing users to tell see page they are on
 @app.callback(
@@ -293,13 +322,24 @@ app.layout = serve_layout
 def toggle_active_links(pathname):
     if pathname == "/":
         # Treat page 1 as the homepage / index
-        return True, False, False
+        return True, False, False, False, False, False
     return [pathname == f"/{c[:-5]}" for c in pages]
-
+    
+'''
+@app.callback(Output('cached-problem-type','data'),
+              [Input('problem_type_dropdown','value')]
+             )
+def set_problem_type(value):
+    if not value:
+        return ''
+    print(value)
+    return value
 
 @app.callback(Output("page-content", "children"), [Input("url", "pathname")])
 def render_page_content(pathname):
-    if pathname in ["/", "/load-data"]:
+    if pathname in ["/"]:
+        return home_div#html.P("This is the content of page 1!")
+    elif pathname in ["/load-data"]:
         return data_div#html.P("This is the content of page 1!")
     elif pathname == "/view-data":
         return html.P("This is the content of page 2. Yay!")
@@ -345,7 +385,7 @@ def update_output(contents, data_sep, index_col, session_id, name, date):
     [Output('feature-dropdown-div','children'),
      Output('cached-features','data')],
     [Input(component_id='output-data-upload', component_property='children'),
-     Input('session-id', 'children')]
+     Input('session-id', 'data')]
 )
 def update_features_dropdown(input_value,session_id):
     df = get_dataframe(session_id)
@@ -361,7 +401,7 @@ def update_features_dropdown(input_value,session_id):
     [Output(component_id='data_table', component_property='children'),
      Output(component_id='target_dropdown', component_property='options')],
     [Input(component_id='feature_dropdown', component_property='value'),
-     Input('session-id', 'children')]
+     Input('session-id', 'data')]
 )
 def update_features_div(input_value,session_id):
     df = get_dataframe(session_id)[input_value]
@@ -380,25 +420,93 @@ def update_cached_target(value):
     return value
     
     
-@app.callback([Output('ml-table-div','children'),
+@app.callback([Output('ml-results-div','children'),
                Output('ml-pipeline-fig-div','children'),
-               Output('roc-fig','children'),
-               Output('feature-imp-fig','children'),
-               Output('conf-matrix-fig','children'),
-               Output('obj-thresh-fig','children'),
-               Output('cached-best-pipeline','data')],
+               Output('cached-pipelines','data')],
               [Input('start_automl_button','n_clicks')],
-              [State('session-id', 'children'),
+              [State('session-id', 'data'),
                State('cached-features', 'data'),
                State('cached-target', 'data'),
-               State('num-models-slider','value')])
-def run_AutoML(clicks, session_id, features, target, num_models):
+               State('num-models-slider','value'),
+               State('cached-problem-type','data')])
+def run_AutoML(clicks, session_id, features, target, num_models, problem_type):
     if not clicks:
         return '',''
         
     #print(clicks)
     #print(features)
     #print(target)
+    print(session_id,clicks)
+    df = get_dataframe(session_id)
+    print(df.dtypes)
+    features = features['features']
+    target = target
+    
+    
+    print(target)
+    print(problem_type)
+    
+    if len(df)==0:
+        return '',''
+
+    X = df[features].drop(target,axis=1)
+    y = df[target]
+
+    X_train, X_test, y_train, y_test = evalml.preprocessing.split_data(X, y, test_size=.3)
+    
+    automl = AutoMLSearch(problem_type=problem_type,  max_iterations=num_models)
+    
+    automl.search(X_train, y_train)
+    
+    results_df = automl.rankings[automl.rankings.columns.tolist()[:-1]]
+    
+    pipeline = automl.best_pipeline
+    pipeline.fit(X_train, y_train)
+    #pipeline.score(X_test, y_test, ["auc"])
+    y_pred = pipeline.predict(X_test)
+    
+    best_graph = automl.best_pipeline.graph()
+    best_graph.format = 'png'
+    image_filename = 'best_pipeline_image'
+    best_graph.render(image_filename)
+    encoded_image = base64.b64encode(open(os.getcwd()+'/'+image_filename+'.png', 'rb').read())
+    
+    return [
+            dbc.Table.from_dataframe(results_df.reset_index(),
+                                     bordered=True,
+                                     dark=False,
+                                     hover=True,
+                                     responsive=True,
+                                     striped=True),
+            html.Img(src=static_image_route + image_filename + '.png'),
+            automl.rankings.loc[:,['pipeline_name','parameters']].to_dict(orient='index')              
+           ]
+
+
+@app.callback(Output('model-to-use-dropdown','options'),
+              [Input('cached-pipelines','data')]
+             )
+def model_select_dropdown(data):
+    if not data:
+        return None
+    
+    return [{'label':v['pipeline_name'], 'value': v['parameters']} for k,v in data.items()]
+           
+                
+
+@app.callback([Output('roc-fig','children'),
+               Output('feature-imp-fig','children'),
+               Output('conf-matrix-fig','children'),
+               Output('obj-thresh-fig','children')],
+              [Input('start_results_plot_button','n_clicks')],
+              [State('session-id', 'data'),
+               State('cached-features', 'data'),
+               State('cached-target', 'data'),
+               State('model-to-use_dropdown','value')])
+def run_model_stats(clicks, session_id, features, target, model_params):
+    
+    if not model_params:
+        return 'Choose a model','','',''
     
     df = get_dataframe(session_id)
     print(df.dtypes)
@@ -416,43 +524,31 @@ def run_AutoML(clicks, session_id, features, target, num_models):
 
     X_train, X_test, y_train, y_test = evalml.preprocessing.split_data(X, y, test_size=.3)
     
-    automl = AutoMLSearch(problem_type="binary", objective="f1", max_iterations=num_models)
-    
-    automl.search(X_train, y_train)
-    
-    results_df = automl.rankings[automl.rankings.columns.tolist()[:-1]]
-    
     pipeline = automl.best_pipeline
     pipeline.fit(X_train, y_train)
     #pipeline.score(X_test, y_test, ["auc"])
     y_pred = pipeline.predict(X_test)
     
-    best_graph = automl.best_pipeline.graph()
-    best_graph.format = 'png'
-    image_filename = 'best_pipeline_image'
-    best_graph.render(image_filename)
-    encoded_image = base64.b64encode(open(os.getcwd()+'/'+image_filename+'.png', 'rb').read())
-    
-    return [[html.H3('Results:'),
-             html.Br(),
-             dash_table.DataTable(
-                                data=results_df.to_dict('records'),
-                                columns=[{'id': c, 'name': c} for c in results_df.columns],
-                                page_action='none',
-                                style_table={'height': '300px', 'overflowY': 'auto'})
-            ],
-            html.Img(src=static_image_route + image_filename + '.png'),
-            dcc.Graph(figure=evalml.model_understanding.graph_roc_curve(y_test,pipeline.predict_proba(X_test))),
-            dcc.Graph(figure=pipeline.graph_feature_importance()),
-            dcc.Graph(figure=evalml.model_understanding.graph_confusion_matrix(y_test,y_pred)),
-            dcc.Graph(figure=evalml.model_understanding.graph_binary_objective_vs_threshold(pipeline,
-                                                                           X_test,
-                                                                           y_test,
-                                                                           'f1',
-                                                                           steps=100)
-                     ),
-            automl.rankings.loc[:,'parameters'].to_dict()           
-           ]
+    return [
+        dcc.Graph(figure=evalml.model_understanding.graph_roc_curve(y_test,pipeline.predict_proba(X_test))),
+        dcc.Graph(figure=pipeline.graph_feature_importance()),
+        dcc.Graph(figure=evalml.model_understanding.graph_confusion_matrix(y_test,y_pred)),
+        dcc.Graph(figure=evalml.model_understanding.graph_binary_objective_vs_threshold(pipeline,
+                                                                       X_test,
+                                                                       y_test,
+                                                                       'f1',
+                                                                       steps=100)
+                 ),
+    ]
+
+            #[html.H3('Results:'),
+            # html.Br(),
+            # dash_table.DataTable(
+            #                    data=results_df.to_dict('records'),
+            #                   columns=[{'id': c, 'name': c} for c in results_df.columns],
+            #                   page_action='none',
+            #                    style_table={'height': '300px', 'overflowY': 'auto'})
+            #]
 
 #'data:image/png;base64,{}'.format(encoded_image)))#os.getcwd()+'/'+image_filename+'.png'))#
     #return dr.generate_table(results_df)
